@@ -1,0 +1,7 @@
+package-as: Overmap
+
+ignore:
+  - curseforge
+  - .github
+  - .gitignore
+  - .pkgmeta

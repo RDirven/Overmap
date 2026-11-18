@@ -1,0 +1,13 @@
+<Bindings>
+	<Binding name="OVERMAP_TOGGLE" header="OVERMAP" category="ADDONS">Overmap_Toggle()</Binding>
+	<Binding name="OVERMAP_HOLD" runOnUp="true" category="ADDONS">Overmap_Hold(keystate)</Binding>
+	<Binding name="OVERMAP_ZOOMIN" category="ADDONS">Overmap_Zoom(1)</Binding>
+	<Binding name="OVERMAP_ZOOMOUT" category="ADDONS">Overmap_Zoom(-1)</Binding>
+	<Binding name="OVERMAP_ALPHAUP" category="ADDONS">Overmap_Alpha(0.1)</Binding>
+	<Binding name="OVERMAP_ALPHADOWN" category="ADDONS">Overmap_Alpha(-0.1)</Binding>
+	<Binding name="OVERMAP_FOLLOW" category="ADDONS">Overmap_ToggleFollow()</Binding>
+	<Binding name="OVERMAP_FOG" category="ADDONS">Overmap_ToggleFog()</Binding>
+	<Binding name="OVERMAP_PRESET" category="ADDONS">Overmap_NextPreset()</Binding>
+	<Binding name="OVERMAP_MARK" category="ADDONS">Overmap_Mark()</Binding>
+	<Binding name="OVERMAP_OPTIONS" category="ADDONS">Overmap_Options()</Binding>
+</Bindings>
