@@ -207,6 +207,18 @@ local MODIFIER_KEYS = {
 	LSHIFT = true, RSHIFT = true, LCTRL = true, RCTRL = true, LALT = true, RALT = true,
 	LMETA = true, RMETA = true, UNKNOWN = true,
 }
+
+-- controller buttons the client turns into Shift / Ctrl / Alt (Options > Gamepad)
+local function IsEmulatedModifier(button)
+	for _, cvar in ipairs({ "GamePadEmulateShift", "GamePadEmulateCtrl", "GamePadEmulateAlt" }) do
+		if GetCVar and GetCVar(cvar) == button then return true end
+	end
+end
+
+local function WithModifiers(key)
+	return (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "")
+		.. (IsShiftKeyDown() and "SHIFT-" or "") .. key
+end
 local function KeyButton(parent, label, action, tip)
 	local f = CreateFrame("Frame", nil, parent)
 	f:SetSize(COL_W, 26)
@@ -220,16 +232,15 @@ local function KeyButton(parent, label, action, tip)
 	local function act() return type(action) == "function" and action() or action end
 	local function stop()
 		b.listening = false
+		b.stoppedAt = GetTime()
 		b:EnableKeyboard(false)
 		if b.EnableGamePadButton then b:EnableGamePadButton(false) end
 		f.Refresh()
 	end
 	local function take(key)
-		if key == "ESCAPE" then stop() return end
-		if MODIFIER_KEYS[key] then return end -- wait for the real key
-		local mods = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "")
-			.. (IsShiftKeyDown() and "SHIFT-" or "")
-		ns:SetKey(act(), mods .. key)
+		if key == "ESCAPE" or key == "PAD2" then stop() return end -- Esc or B cancels
+		if MODIFIER_KEYS[key] or IsEmulatedModifier(key) then return end -- wait for the real key
+		ns:SetKey(act(), WithModifiers(key))
 		stop()
 	end
 	b:SetScript("OnClick", function(_, button)
@@ -239,7 +250,10 @@ local function KeyButton(parent, label, action, tip)
 			f.Refresh()
 			return
 		end
-		if b.listening then stop() return end
+		-- with a controller the button press that binds can also "click" this
+		-- button: never let that cancel or restart listening
+		if b.listening then return end
+		if b.stoppedAt and GetTime() - b.stoppedAt < 0.4 then return end
 		b.listening = true
 		b:SetText("Press a key...")
 		b:EnableKeyboard(true)
@@ -254,7 +268,7 @@ local function KeyButton(parent, label, action, tip)
 	b:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:SetText(label, 1, 1, 1)
-		GameTooltip:AddLine("Click, then press a key or controller button. Right-click to clear. Esc cancels.", nil, nil, nil, true)
+		GameTooltip:AddLine("Click, then press a key or controller button (hold a modifier for a combination). Right-click clears it, Esc or B cancels.", nil, nil, nil, true)
 		if tip then GameTooltip:AddLine(tip, nil, nil, nil, true) end
 		GameTooltip:Show()
 	end)
