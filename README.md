@@ -30,7 +30,9 @@ So it never taints the UI, it works in combat, and your normal map (M) is not ch
 ## Getting started
 
 1. Copy the `Overmap` folder to `World of Warcraft\_<flavor>_\Interface\AddOns\`.
-2. Bind a key: `/om bind TAB` (toggle) or `/om hold <key>` (hold), or via Key Bindings > AddOns > Overmap.
+2. Bind a key in the options (`/om` > Keys): click "Overlay key", press a key or controller button, and choose
+   "Tap" (on / off) or "Hold" (shown while held). "Switch look key" goes through the looks you tick next to it.
+   `/om bind TAB` (tap) and `/om hold <key>` work too.
 3. `/om` opens the options. The map stays visible while you change them.
 
 ## Commands

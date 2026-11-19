@@ -202,6 +202,88 @@ local function Color(parent, key, label)
 	return f
 end
 
+-- click, then press a key (or controller button) to bind it; right-click clears it
+local MODIFIER_KEYS = {
+	LSHIFT = true, RSHIFT = true, LCTRL = true, RCTRL = true, LALT = true, RALT = true,
+	LMETA = true, RMETA = true, UNKNOWN = true,
+}
+local function KeyButton(parent, label, action, tip)
+	local f = CreateFrame("Frame", nil, parent)
+	f:SetSize(COL_W, 26)
+	local t = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	t:SetPoint("LEFT")
+	t:SetText(label)
+	local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	b:SetSize(150, 22)
+	b:SetPoint("RIGHT")
+	b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	local function act() return type(action) == "function" and action() or action end
+	local function stop()
+		b.listening = false
+		b:EnableKeyboard(false)
+		if b.EnableGamePadButton then b:EnableGamePadButton(false) end
+		f.Refresh()
+	end
+	local function take(key)
+		if key == "ESCAPE" then stop() return end
+		if MODIFIER_KEYS[key] then return end -- wait for the real key
+		local mods = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "")
+			.. (IsShiftKeyDown() and "SHIFT-" or "")
+		ns:SetKey(act(), mods .. key)
+		stop()
+	end
+	b:SetScript("OnClick", function(_, button)
+		if button == "RightButton" then
+			if b.listening then stop() end
+			ns:SetKey(act(), nil)
+			f.Refresh()
+			return
+		end
+		if b.listening then stop() return end
+		b.listening = true
+		b:SetText("Press a key...")
+		b:EnableKeyboard(true)
+		if b.SetPropagateKeyboardInput then b:SetPropagateKeyboardInput(false) end
+		if b.EnableGamePadButton then b:EnableGamePadButton(true) end
+	end)
+	b:SetScript("OnKeyDown", function(_, key) if b.listening then take(key) end end)
+	if b.EnableGamePadButton then
+		b:SetScript("OnGamePadButtonDown", function(_, key) if b.listening then take(key) end end)
+	end
+	b:SetScript("OnHide", function() if b.listening then stop() end end)
+	b:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(label, 1, 1, 1)
+		GameTooltip:AddLine("Click, then press a key or controller button. Right-click to clear. Esc cancels.", nil, nil, nil, true)
+		if tip then GameTooltip:AddLine(tip, nil, nil, nil, true) end
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	f.Refresh = function()
+		if b.listening then return end
+		local k = GetBindingKey(act())
+		b:SetText(k and (GetBindingText and GetBindingText(k) or k) or "Not bound")
+	end
+	widgets[#widgets + 1] = f
+	return f
+end
+
+-- small tick box for one preset in the "switch look" list
+local function PresetCheck(parent, name, text)
+	local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+	cb:SetSize(24, 24)
+	local t = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	t:SetPoint("LEFT", cb, "RIGHT", 0, 0)
+	t:SetText(text)
+	cb.label = t
+	cb:SetScript("OnClick", function(self)
+		DB().cyclePresets[name] = self:GetChecked() and true or false
+	end)
+	cb.Refresh = function() cb:SetChecked(DB().cyclePresets[name] and true or false) end
+	widgets[#widgets + 1] = cb
+	return cb
+end
+
 local function Button(parent, text, width, onClick)
 	local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
 	b:SetSize(width, 22)
@@ -231,7 +313,7 @@ end
 
 local function Build()
 	frame = CreateFrame("Frame", "OvermapOptions", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-	frame:SetSize(3 * COL_W + 4 * 24, 640)
+	frame:SetSize(3 * COL_W + 4 * 24, 740)
 	frame:SetPoint("CENTER", 0, 0)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetToplevel(true)
@@ -334,6 +416,30 @@ local function Build()
 		Check(frame, "tooltips", "Marker names on hover"),
 	})
 
+	-- bottom: keys
+	local keys = Header(frame, "Keys")
+	keys:SetPoint("BOTTOMLEFT", 24, 150)
+	local overlayKey = KeyButton(frame, "Overlay key", function() return ns:OverlayAction() end)
+	overlayKey:SetPoint("BOTTOMLEFT", 24, 116)
+	local mode = Cycle(frame, "keyMode", "Hold or tap", {
+		{ value = "toggle", text = "Tap: on / off" },
+		{ value = "hold", text = "Hold to show" },
+	})
+	mode:SetPoint("BOTTOMLEFT", x2, 116)
+	local lookKey = KeyButton(frame, "Switch look key", "OVERMAP_PRESET",
+		"Each press goes to the next ticked look.")
+	lookKey:SetPoint("BOTTOMLEFT", 24, 86)
+	local prevCheck
+	for _, p in ipairs(ns.presets) do
+		local cb = PresetCheck(frame, p.name, p.text)
+		if prevCheck then
+			cb:SetPoint("LEFT", prevCheck.label, "RIGHT", 10, 0)
+		else
+			cb:SetPoint("LEFT", lookKey, "RIGHT", 24 - 4, 0)
+		end
+		prevCheck = cb
+	end
+
 	-- bottom: presets
 	local label = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	label:SetPoint("BOTTOMLEFT", 24, 52)
@@ -354,9 +460,9 @@ local function Build()
 	end)
 	center:SetPoint("RIGHT", reset, "LEFT", -6, 0)
 
-	local keys = frame:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	keys:SetPoint("BOTTOMRIGHT", -24, 52)
-	keys:SetText("Keys: Key Bindings > AddOns > Overmap, or /om bind TAB")
+	local more = frame:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	more:SetPoint("BOTTOMRIGHT", -24, 52)
+	more:SetText("More keys (zoom, opacity, ...): Key Bindings > AddOns > Overmap")
 
 	frame:SetScript("OnShow", function()
 		ns.optionsOpen = true

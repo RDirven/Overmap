@@ -59,7 +59,12 @@ ns.defaults = {
 	showCoords = false,
 	hideMinimap = false,
 	hideInCombat = false,
+	-- keys
+	keyMode = "toggle", -- "toggle": tap to show / hide, "hold": shown while held
+	cyclePresets = { Minimap = true, Diablo = true }, -- presets the "switch look" key goes through
 }
+-- settings that belong to the player, not to a look: presets and /om save skip them
+ns.notInLook = { keyMode = true, cyclePresets = true }
 
 -- shape key -> mask file + how the markers fade near the edge
 ns.shapes = {
@@ -1052,15 +1057,21 @@ function ns:ApplyPreset(name)
 end
 
 function ns:NextPreset()
+	local list = {}
+	for _, p in ipairs(ns.presets) do
+		if db.cyclePresets[p.name] then list[#list + 1] = p end
+	end
+	if #list == 0 then list = ns.presets end
 	local idx = 0
-	for i, p in ipairs(ns.presets) do if p.name == OvermapDB.lastPreset then idx = i end end
-	idx = idx % #ns.presets + 1
-	ns:ApplyPreset(ns.presets[idx].name)
+	for i, p in ipairs(list) do if p.name == OvermapDB.lastPreset then idx = i end end
+	idx = idx % #list + 1
+	ns:ApplyPreset(list[idx].name)
 end
 
 function ns:ResetSettings()
 	wipe(db)
 	FillDefaults(db, ns.defaults)
+	ns:SyncKeyMode()
 	ns:ApplyAll()
 	ns:RefreshOptions()
 	Print("settings reset")
@@ -1088,6 +1099,8 @@ function ns:SettingChanged(key)
 		for _, p in ipairs(pinFrames) do p.data = nil end
 	elseif key == "follow" then
 		S.panX, S.panY = 0, 0
+	elseif key == "keyMode" then
+		ns:SwapOverlayKeyMode()
 	end
 	if key:find("^show") or key == "tooltips" then ns:CollectSlow() end
 	S.layoutKey = nil
@@ -1183,10 +1196,10 @@ end
 
 function Overmap_Hold(keystate)
 	if keystate == "down" then
-		if not S.open then
-			S.holdOpened = true
-			ns:Open()
-		end
+		-- someone who holds a key does not want it open after a reload
+		OvermapDB.open = false
+		S.holdOpened = true -- also when it was already open: letting go closes it
+		if not S.open then ns:Open() end
 	elseif S.holdOpened then
 		ns:Close()
 	end
@@ -1228,17 +1241,67 @@ local HELP = {
 	"/om reset - default settings, /om center - back to the middle",
 }
 
+-- the overlay key is bound to OVERMAP_TOGGLE or OVERMAP_HOLD, depending on keyMode
+function ns:OverlayAction()
+	return (db.keyMode == "hold") and "OVERMAP_HOLD" or "OVERMAP_TOGGLE"
+end
+
+local function SaveKeys()
+	local set = GetCurrentBindingSet and GetCurrentBindingSet()
+	if set and SaveBindings then SaveBindings(set) end
+end
+
+local function ClearAction(action)
+	local keys = { GetBindingKey(action) }
+	for _, k in ipairs(keys) do SetBinding(k) end
+	return keys
+end
+
+-- bind key to action (nil key: clear it). Returns true when it worked.
+function ns:SetKey(action, key)
+	if InCombatLockdown() then Print("key bindings cannot change in combat") return end
+	ClearAction(action)
+	if action == "OVERMAP_TOGGLE" or action == "OVERMAP_HOLD" then
+		-- one overlay key: never on both
+		ClearAction(action == "OVERMAP_TOGGLE" and "OVERMAP_HOLD" or "OVERMAP_TOGGLE")
+	end
+	local ok = true
+	if key then ok = SetBinding(key, action) and true or false end
+	SaveKeys()
+	if not ok then Print("could not bind " .. key) end
+	return ok
+end
+
+-- match keyMode to what is bound (e.g. a hold key set in the Key Bindings window)
+function ns:SyncKeyMode()
+	local toggleKey, holdKey = GetBindingKey("OVERMAP_TOGGLE"), GetBindingKey("OVERMAP_HOLD")
+	if holdKey and not toggleKey then db.keyMode = "hold" elseif toggleKey and not holdKey then db.keyMode = "toggle" end
+end
+
+-- tap <-> hold: move the overlay key to the other action
+function ns:SwapOverlayKeyMode()
+	if InCombatLockdown() then Print("key bindings cannot change in combat") return end
+	local new = ns:OverlayAction()
+	local old = (new == "OVERMAP_HOLD") and "OVERMAP_TOGGLE" or "OVERMAP_HOLD"
+	local keys = ClearAction(old)
+	for _, k in ipairs(keys) do SetBinding(k, new) end
+	SaveKeys()
+	if new == "OVERMAP_HOLD" then
+		OvermapDB.open = false -- a hold key user does not want it open after a reload
+		if S.open and not ns.optionsOpen then ns:Close() end
+	end
+	ns:RefreshOptions()
+end
+
 local function Bind(key, action)
 	if not key or key == "" then Print("give a key, e.g. /om bind TAB") return end
-	if InCombatLockdown() then Print("not in combat") return end
 	key = key:upper()
-	if SetBinding(key, action) then
-		local set = GetCurrentBindingSet and GetCurrentBindingSet()
-		if set and SaveBindings then SaveBindings(set) end
+	db.keyMode = (action == "OVERMAP_HOLD") and "hold" or "toggle"
+	if ns:SetKey(action, key) then
+		if action == "OVERMAP_HOLD" then OvermapDB.open = false end
 		Print(key .. " now " .. (action == "OVERMAP_HOLD" and "shows the overlay while held" or "toggles the overlay"))
-	else
-		Print("could not bind " .. key)
 	end
+	ns:RefreshOptions()
 end
 
 SLASH_OVERMAP1 = "/om"
@@ -1265,7 +1328,9 @@ SlashCmdList.OVERMAP = function(msg)
 	elseif cmd == "save" then
 		if rest == "" then Print("give a name") return end
 		local t = {}
-		for k in pairs(ns.defaults) do t[k] = CopyValue(db[k]) end
+		for k in pairs(ns.defaults) do
+			if not ns.notInLook[k] then t[k] = CopyValue(db[k]) end
+		end
 		OvermapDB.custom[rest] = t
 		Print("saved as '" .. rest .. "' (load it with /om load " .. rest .. ")")
 	elseif cmd == "load" then
@@ -1310,6 +1375,7 @@ ev:SetScript("OnEvent", function(_, event, arg1)
 		CreateFrames()
 		ns:ApplyAll()
 	elseif event == "PLAYER_LOGIN" then
+		ns:SyncKeyMode()
 		if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(0.5, RecordTrail) end
 		if not OvermapDB.welcomed then
 			OvermapDB.welcomed = true
