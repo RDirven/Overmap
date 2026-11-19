@@ -1,6 +1,7 @@
 -- Overmap: a Diablo 2 style, click-through map drawn over the world.
 -- It does not touch the game's WorldMapFrame: it draws the map art itself,
 -- so it never taints, works in combat and your normal map (M) stays as it is.
+-- In minimap mode it borrows the game's Minimap instead and shows it big and see-through.
 
 local addonName, ns = ...
 _G.Overmap = ns
@@ -18,17 +19,18 @@ local floor, min, max, abs, sqrt = math.floor, math.min, math.max, math.abs, mat
 
 ns.defaults = {
 	-- frame
-	width = 820, height = 580, scale = 1,
+	width = 900, height = 900, scale = 1,
 	point = "CENTER", relPoint = "CENTER", x = 0, y = 30,
 	strata = "LOW",
 	locked = true,
 	shiftInteract = true,
 	-- look
+	source = "minimap", -- "map": world map art, "minimap": the game's minimap, big and see-through
 	mapAlpha = 0.5,
 	pinAlpha = 1,
 	bgAlpha = 0,
-	movingAlpha = 1,
-	shape = "RectSoft",
+	movingAlpha = 0.8,
+	shape = "OvalSofter",
 	blend = "BLEND",
 	desaturate = false,
 	tint = { r = 1, g = 1, b = 1 },
@@ -53,8 +55,8 @@ ns.defaults = {
 	trailLength = 200,
 	tooltips = true,
 	-- extras
-	showZoneText = true,
-	showCoords = true,
+	showZoneText = false,
+	showCoords = false,
 	hideMinimap = false,
 	hideInCombat = false,
 }
@@ -74,7 +76,14 @@ local shapeByKey = {}
 for _, s in ipairs(ns.shapes) do shapeByKey[s.key] = s end
 
 ns.presets = {
+	{ name = "Minimap", text = "Minimap", settings = {
+		source = "minimap",
+		width = 900, height = 900, point = "CENTER", relPoint = "CENTER", x = 0, y = 30,
+		mapAlpha = 0.5, pinAlpha = 1, bgAlpha = 0, movingAlpha = 0.8,
+		shape = "OvalSofter", follow = true, showZoneText = false, showCoords = false, strata = "LOW",
+	} },
 	{ name = "Diablo", text = "Diablo", settings = {
+		source = "map",
 		width = 900, height = 640, point = "CENTER", relPoint = "CENTER", x = 0, y = 30,
 		mapAlpha = 0.6, pinAlpha = 0.95, bgAlpha = 0, movingAlpha = 0.85,
 		shape = "OvalSofter", blend = "ADD", desaturate = true, tint = { r = 1, g = 0.72, b = 0.4 },
@@ -82,6 +91,7 @@ ns.presets = {
 		showTrail = false, showZoneText = false, showCoords = false, strata = "LOW",
 	} },
 	{ name = "Overlay", text = "See-through", settings = {
+		source = "map",
 		width = 820, height = 580, point = "CENTER", relPoint = "CENTER", x = 0, y = 30,
 		mapAlpha = 0.45, pinAlpha = 1, bgAlpha = 0, movingAlpha = 1,
 		shape = "RectSoft", blend = "BLEND", desaturate = false, tint = { r = 1, g = 1, b = 1 },
@@ -89,6 +99,7 @@ ns.presets = {
 		showZoneText = true, showCoords = true, strata = "LOW",
 	} },
 	{ name = "Farming", text = "Farming", settings = {
+		source = "map",
 		width = 1000, height = 700, point = "CENTER", relPoint = "CENTER", x = 0, y = 20,
 		mapAlpha = 0.3, pinAlpha = 1, bgAlpha = 0, movingAlpha = 0.7,
 		shape = "RectSofter", blend = "BLEND", desaturate = true, tint = { r = 0.75, g = 0.9, b = 1 },
@@ -97,6 +108,7 @@ ns.presets = {
 		strata = "LOW",
 	} },
 	{ name = "Corner", text = "Corner", settings = {
+		source = "map",
 		width = 300, height = 300, point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -230, y = -20,
 		mapAlpha = 0.9, pinAlpha = 1, bgAlpha = 0.5, movingAlpha = 1,
 		shape = "OvalSoft", blend = "BLEND", desaturate = false, tint = { r = 1, g = 1, b = 1 },
@@ -187,7 +199,7 @@ local S = {
 }
 ns.state = S
 
-local root, bgFrame, canvas, trailLayer, pinLayer, topLayer
+local root, bgFrame, canvas, miniHolder, trailLayer, pinLayer, topLayer
 local arrow, zoneText, coordText, grip, border
 local masks = {}
 local tiles, explored = {}, {}
@@ -231,6 +243,14 @@ local function CreateFrames()
 	canvas:SetAllPoints()
 	canvas.mask = MakeMask(canvas)
 
+	-- holds the game's minimap in minimap mode. Not a child of root: the minimap
+	-- draws no terrain inside a frame that clips its children (only black).
+	miniHolder = CreateFrame("Frame", nil, UIParent)
+	miniHolder:SetPoint("CENTER", root, "CENTER")
+	miniHolder:Hide()
+	root:HookScript("OnShow", function() miniHolder:Show() end)
+	root:HookScript("OnHide", function() miniHolder:Hide() end)
+
 	-- markers
 	trailLayer = CreateFrame("Frame", nil, root)
 	trailLayer:SetAllPoints()
@@ -239,6 +259,7 @@ local function CreateFrames()
 
 	topLayer = CreateFrame("Frame", nil, root)
 	topLayer:SetAllPoints()
+	topLayer:SetFrameLevel(root:GetFrameLevel() + 10)
 
 	arrow = topLayer:CreateTexture(nil, "OVERLAY")
 	arrow:SetTexture(ns.ARROW)
@@ -292,7 +313,10 @@ local function CreateFrames()
 	root:SetScript("OnMouseUp", function(_, button)
 		if button == "RightButton" then S.panning = nil end
 	end)
-	root:SetScript("OnSizeChanged", function() S.layoutKey = nil end)
+	root:SetScript("OnSizeChanged", function()
+		S.layoutKey = nil
+		ns:PlaceMinimap()
+	end)
 	root:SetScript("OnUpdate", function(_, elapsed) ns:OnUpdate(elapsed) end)
 end
 
@@ -424,6 +448,7 @@ function ns:ApplyShape()
 	end
 	S.shape = s
 	S.pinsDirty = true
+	ns:PlaceMinimap()
 end
 
 -- 0..1: how visible a marker at screen point (sx, sy) is inside the shape
@@ -647,7 +672,7 @@ function ns:PlaceArrow()
 		local f = PlayerFacing()
 		if f then arrow:SetRotation(f) end
 		arrow:SetAlpha(db.pinAlpha * S.moveMul * S.fade * EdgeFactor(sx, sy))
-		arrow:Show()
+		arrow:SetShown(not ns:MinimapBorrowed()) -- the minimap draws its own arrow
 		if db.showCoords then
 			coordText:SetFormattedText("%.1f, %.1f", x * 100, y * 100)
 		end
@@ -723,6 +748,7 @@ function ns:OnUpdate(elapsed)
 	pinLayer:SetAlpha(db.pinAlpha * mul)
 	trailLayer:SetAlpha(db.pinAlpha * mul)
 	topLayer:SetAlpha(S.fade)
+	ns:UpdateMinimapAlpha(db.mapAlpha * S.moveMul)
 
 	ns:ApplyInteract()
 	ns:UpdatePlayer()
@@ -775,11 +801,158 @@ local function SetMinimapHidden(hide)
 end
 
 ---------------------------------------------------------------------------
+-- Minimap mode: the game's own minimap, big and see-through over the world.
+-- Indoors it draws the outlines of rooms and corridors, like the Diablo map.
+---------------------------------------------------------------------------
+
+local borrowed -- the minimap's own state while it is in the overlay
+
+local function WantMinimapMode()
+	return S.open and db.source == "minimap" and Minimap ~= nil
+end
+
+function ns:MinimapBorrowed() return borrowed ~= nil end
+
+local function DefaultMinimapMask()
+	if MinimapCluster and MinimapCluster.MinimapContainer then
+		return "Interface\\CharacterFrame\\TempPortraitAlphaMask" -- Retail
+	end
+	return "Textures\\MinimapMask"
+end
+
+-- the minimap only redraws its terrain at a new size after a zoom change
+local function RedrawNow(m)
+	local z = m:GetZoom()
+	m:SetZoom(z > 0 and z - 1 or z + 1)
+	m:SetZoom(z)
+end
+
+-- the client may only pick up the new size on a later frame, so redraw again then
+local function RedrawMinimap(m)
+	RedrawNow(m)
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0, function() RedrawNow(m) end)
+		C_Timer.After(0.2, function() RedrawNow(m) end)
+	end
+end
+
+-- the empty minimap border stays behind, hide it while the minimap is ours
+local function WantClusterHidden()
+	if borrowed then return MinimapCluster ~= nil end -- never hide the borrowed minimap itself
+	return db.hideMinimap
+end
+
+function ns:PlaceMinimap()
+	if not borrowed then return end
+	local m = Minimap
+	if m:GetParent() ~= miniHolder then m:SetParent(miniHolder) end
+	local W, H = root:GetSize()
+	local side = min(W, H) -- the minimap is always square
+	miniHolder:SetScale(root:GetScale())
+	miniHolder:SetSize(side, side)
+	miniHolder:SetFrameStrata(root:GetFrameStrata())
+	miniHolder:SetFrameLevel(root:GetFrameLevel() + 2)
+	miniHolder:SetShown(root:IsShown())
+	m:SetSize(side, side)
+	m:SetScale(1)
+	m:ClearAllPoints()
+	m:SetPoint("CENTER", miniHolder, "CENTER")
+	m:SetFrameStrata(root:GetFrameStrata())
+	m:SetFrameLevel(miniHolder:GetFrameLevel() + 1)
+	S.miniMask = nil
+	ns:UpdateMinimapAlpha(db.mapAlpha * S.moveMul)
+	RedrawMinimap(m)
+end
+
+local function BorrowMinimap()
+	local m = Minimap
+	if borrowed or not m then return end
+	if InCombatLockdown() and m:IsProtected() then return end
+	borrowed = {
+		parent = m:GetParent(), points = {},
+		w = m:GetWidth(), h = m:GetHeight(), scale = m:GetScale(), alpha = m:GetAlpha(),
+		strata = m:GetFrameStrata(), level = m:GetFrameLevel(),
+		mouse = m:IsMouseEnabled(), wheel = m:IsMouseWheelEnabled(),
+		zoom = m:GetZoom(),
+	}
+	for i = 1, m:GetNumPoints() do borrowed.points[i] = { m:GetPoint(i) } end
+	m:SetParent(miniHolder)
+	-- the border ring, zoom buttons etc. hang on the minimap itself: hide them
+	borrowed.hidden = {}
+	local function stash(list)
+		for _, o in ipairs(list) do
+			if o:IsShown() and pcall(o.Hide, o) then borrowed.hidden[#borrowed.hidden + 1] = o end
+		end
+	end
+	stash({ m:GetChildren() })
+	stash({ m:GetRegions() })
+	-- click-through, like the rest of the overlay
+	m:EnableMouse(false)
+	m:EnableMouseWheel(false)
+	if db.miniZoom then m:SetZoom(Clamp(db.miniZoom, 0, m:GetZoomLevels() - 1)) end
+	m:SetAlpha(1)
+	miniHolder:SetAlpha(1)
+	m:Show()
+	ns:PlaceMinimap()
+end
+
+local function ReturnMinimap()
+	local b = borrowed
+	if not b then return end
+	if InCombatLockdown() and Minimap:IsProtected() then return end
+	borrowed = nil
+	local m = Minimap
+	db.miniZoom = m:GetZoom()
+	m:SetParent(b.parent)
+	m:ClearAllPoints()
+	for _, p in ipairs(b.points) do m:SetPoint(unpack(p)) end
+	m:SetSize(b.w, b.h)
+	m:SetScale(b.scale)
+	m:SetAlpha(b.alpha)
+	m:SetFrameStrata(b.strata)
+	m:SetFrameLevel(b.level)
+	m:EnableMouse(b.mouse)
+	m:EnableMouseWheel(b.wheel)
+	for _, o in ipairs(b.hidden) do pcall(o.Show, o) end
+	pcall(m.SetMaskTexture, m, DefaultMinimapMask())
+	m:SetZoom(b.zoom)
+	RedrawMinimap(m)
+end
+
+-- The minimap draws no terrain at all when it (or a parent) is even slightly
+-- transparent. Its mask's alpha does work, so opacity picks a mask with the
+-- shape at 10%, 20% ... 100% (Media\Mini). The markers are not masked.
+function ns:UpdateMinimapAlpha(a)
+	if not borrowed then return end
+	-- the game may put the minimap back in its own frame (e.g. Edit Mode)
+	if Minimap:GetParent() ~= miniHolder then ns:PlaceMinimap() return end
+	Minimap:SetAlpha(1)
+	miniHolder:SetAlpha(1)
+	local level = Clamp(floor(a * 10 + 0.5), 1, 10) * 10
+	local key = (S.shape and S.shape.key or "RectSoft") .. level
+	if key ~= S.miniMask then
+		S.miniMask = key
+		pcall(Minimap.SetMaskTexture, Minimap, MEDIA .. "Mini\\" .. key)
+	end
+end
+
+-- switch between drawing the map art and showing the minimap
+function ns:UpdateSource()
+	if WantMinimapMode() then BorrowMinimap() else ReturnMinimap() end
+	local art = not borrowed
+	canvas:SetShown(art)
+	pinLayer:SetShown(art)
+	trailLayer:SetShown(art)
+	if S.open then SetMinimapHidden(WantClusterHidden()) end
+end
+
+---------------------------------------------------------------------------
 -- Open / close / actions
 ---------------------------------------------------------------------------
 
 function ns:Open()
 	if S.open then return end
+	if not S.holdOpened and not ns.optionsOpen then OvermapDB.open = true end
 	S.open = true
 	S.fade = 0
 	S.panX, S.panY = 0, 0
@@ -791,17 +964,19 @@ function ns:Open()
 	else
 		root:Show()
 	end
-	if db.hideMinimap then SetMinimapHidden(true) end
+	ns:UpdateSource()
 end
 
 function ns:Close()
 	if not S.open then return end
 	if ns.optionsOpen then return end -- stays visible as a live preview
+	if not S.holdOpened then OvermapDB.open = false end
 	S.open = false
 	S.combatHidden = false
 	S.holdOpened = false
 	root:Hide()
 	GameTooltip:Hide()
+	ns:UpdateSource()
 	SetMinimapHidden(false)
 end
 
@@ -812,6 +987,13 @@ function ns:Toggle()
 end
 
 function ns:Zoom(dir)
+	if borrowed then
+		local m = Minimap
+		local z = Clamp(m:GetZoom() + ((dir > 0) and 1 or -1), 0, m:GetZoomLevels() - 1)
+		m:SetZoom(z)
+		db.miniZoom = z
+		return
+	end
 	local z = db.zoom * ((dir > 0) and 1.25 or 0.8)
 	db.zoom = Clamp(floor(z * 100 + 0.5) / 100, 0.5, 12)
 	ns:RefreshOptions()
@@ -842,7 +1024,8 @@ function ns:ApplyAll()
 	S.layoutKey = nil
 	S.pinsDirty = true
 	if S.open then
-		if db.hideMinimap then SetMinimapHidden(true) else SetMinimapHidden(false) end
+		ns:UpdateSource()
+		ns:PlaceMinimap()
 		ns:CollectSlow()
 	end
 end
@@ -889,14 +1072,18 @@ function ns:SettingChanged(key)
 		root:SetSize(db.width, db.height)
 	elseif key == "scale" then
 		root:SetScale(db.scale)
+		ns:PlaceMinimap()
 	elseif key == "strata" then
 		root:SetFrameStrata(db.strata)
+		ns:PlaceMinimap()
+	elseif key == "source" then
+		ns:UpdateSource()
 	elseif key == "shape" then
 		ns:ApplyShape()
 	elseif key == "blend" or key == "desaturate" or key == "tint" or key == "showExplored" or key == "fogOnly" then
 		ns:ApplyLook()
 	elseif key == "hideMinimap" then
-		if S.open then SetMinimapHidden(db.hideMinimap) end
+		if S.open then SetMinimapHidden(WantClusterHidden()) end
 	elseif key == "pinScale" then
 		for _, p in ipairs(pinFrames) do p.data = nil end
 	elseif key == "follow" then
@@ -1030,7 +1217,8 @@ function Overmap_Options() ns:ToggleOptions() end
 local HELP = {
 	"/om - options",
 	"/om toggle | show | hide",
-	"/om preset diablo | overlay | farming | corner",
+	"/om preset minimap | diablo | overlay | farming | corner",
+	"/om mode map | minimap - draw the world map or show the minimap",
 	"/om save <name>, /om load <name> - your own presets",
 	"/om bind <key> - bind the toggle key, e.g. /om bind TAB",
 	"/om hold <key> - bind a hold-to-show key",
@@ -1065,6 +1253,15 @@ SlashCmdList.OVERMAP = function(msg)
 	elseif cmd == "hide" then ns:Close()
 	elseif cmd == "preset" then
 		if not ns:ApplyPreset(rest) then Print("unknown preset: " .. rest) end
+	elseif cmd == "mode" then
+		rest = rest:lower()
+		if rest ~= "map" and rest ~= "minimap" then
+			rest = (db.source == "minimap") and "map" or "minimap"
+		end
+		db.source = rest
+		ns:SettingChanged("source")
+		ns:RefreshOptions()
+		Print("mode: " .. rest)
 	elseif cmd == "save" then
 		if rest == "" then Print("give a name") return end
 		local t = {}
@@ -1118,6 +1315,15 @@ ev:SetScript("OnEvent", function(_, event, arg1)
 			OvermapDB.welcomed = true
 			Print("type /om for options, or /om bind TAB to toggle the map with Tab.")
 		end
+		-- open again after login / reload if it was open (and on first use);
+		-- a moment later, so the game has placed its own minimap first
+		if OvermapDB.open ~= false then
+			if C_Timer and C_Timer.After then
+				C_Timer.After(1, function() if OvermapDB.open ~= false then ns:Open() end end)
+			else
+				ns:Open()
+			end
+		end
 	elseif event == "PLAYER_REGEN_DISABLED" then
 		if db.hideInCombat and S.open and not ns.optionsOpen then
 			S.combatHidden = true
@@ -1128,6 +1334,7 @@ ev:SetScript("OnEvent", function(_, event, arg1)
 			S.combatHidden = false
 			if S.open then root:Show() end
 		end
+		if not S.open and ns:MinimapBorrowed() then ns:UpdateSource() end -- could not give it back in combat
 		if miniShowLater then
 			miniShowLater = nil
 			local f = MinimapFrame()

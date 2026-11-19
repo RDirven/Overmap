@@ -21,7 +21,10 @@ So it never taints the UI, it works in combat, and your normal map (M) is not ch
   your corpse and your map pin. Names show on hover without catching your clicks.
 - **Farming**: your own farm marks (raid icons with a label, saved per zone) and a walked trail that shows which
   part of your route you have done.
-- **Presets**: Diablo, See-through, Farming and Corner, plus your own (`/om save <name>`, `/om load <name>`).
+- **Minimap mode**: shows the game's own minimap big instead of the world map. It works where the world map
+  hides your position. Its opacity works through the shape mask
+  (in steps of 10%), since the game draws no minimap terrain when the minimap itself is see-through. Switch with `/om mode` or the "Show" option; the wheel and zoom keys zoom the minimap.
+- **Presets**: Minimap, Diablo, See-through, Farming and Corner, plus your own (`/om save <name>`, `/om load <name>`).
 - Hide the minimap while it is open, hide it in combat, zone name and coordinates.
 
 ## Getting started
@@ -36,7 +39,8 @@ So it never taints the UI, it works in combat, and your normal map (M) is not ch
 | --- | --- |
 | `/om` | options |
 | `/om toggle`, `show`, `hide` | the overlay |
-| `/om preset diablo \| overlay \| farming \| corner` | load a preset |
+| `/om mode map \| minimap` | world map or minimap |
+| `/om preset minimap \| diablo \| overlay \| farming \| corner` | load a preset |
 | `/om save <name>`, `/om load <name>` | your own presets |
 | `/om bind <key>`, `/om hold <key>` | bind a key |
 | `/om mark [1-8] [label]` | farm mark at your position |

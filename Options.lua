@@ -270,6 +270,10 @@ local function Build()
 	-- Column 1: look
 	Column(frame, x1, {
 		Header(frame, "Look"),
+		Cycle(frame, "source", "Show", {
+			{ value = "map", text = "World map" },
+			{ value = "minimap", text = "Minimap (outlines)" },
+		}),
 		Slider(frame, "mapAlpha", "Map opacity", 0, 1, 0.01, pct),
 		Slider(frame, "pinAlpha", "Marker opacity", 0, 1, 0.01, pct),
 		Slider(frame, "bgAlpha", "Dark background", 0, 1, 0.01, pct),
@@ -336,7 +340,7 @@ local function Build()
 	label:SetText("Presets")
 	local prev
 	for _, p in ipairs(ns.presets) do
-		local b = Button(frame, p.text, 110, function() ns:ApplyPreset(p.name) end)
+		local b = Button(frame, p.text, 100, function() ns:ApplyPreset(p.name) end)
 		if prev then b:SetPoint("LEFT", prev, "RIGHT", 6, 0) else b:SetPoint("BOTTOMLEFT", 24, 22) end
 		prev = b
 	end
